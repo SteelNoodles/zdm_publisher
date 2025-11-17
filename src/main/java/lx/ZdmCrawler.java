@@ -260,6 +260,7 @@ public class ZdmCrawler {
             System.out.println("WxPusher推送配置不完整,将尝试其他推送方式");
             return false;
         }
+        System.out.println("SPT：" + spt);
 
         HashMap<String, Object> body = new HashMap<>();
         //推送内容
