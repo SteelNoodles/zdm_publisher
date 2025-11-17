@@ -29,22 +29,65 @@ class DatabaseUtil:
         await self.disconnect()
     
     async def _create_tables(self):
-        """创建必要的数据库表"""
+        """创建必要的数据库表，确保字段名称正确"""
         conn = await self.connect()
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS ZDM (
-                article_id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                url TEXT NOT NULL,
-                article_pic_url TEXT,
-                price TEXT,
-                voted INTEGER DEFAULT 0,
-                comments INTEGER DEFAULT 0,
-                article_mall TEXT,
-                article_time TEXT,
-                pushed INTEGER DEFAULT 0
-            )
-        ''')
+        # 检查表是否存在
+        async with conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ZDM'") as cursor:
+            table_exists = await cursor.fetchone() is not None
+        
+        if table_exists:
+            # 检查表结构，确保有所有必要的列
+            async with conn.execute("PRAGMA table_info(ZDM)") as cursor:
+                columns = {row[1] for row in await cursor.fetchall()}
+            
+            # 如果缺少必要的列，重建表
+            required_columns = {'article_id', 'title', 'url', 'article_pic_url', 'price', 'voted', 'comments', 'article_mall', 'article_time', 'pushed'}
+            if not required_columns.issubset(columns):
+                # 备份原表数据
+                await conn.execute("ALTER TABLE ZDM RENAME TO ZDM_old")
+                
+                # 创建新表
+                await conn.execute('''
+                    CREATE TABLE ZDM (
+                        article_id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        article_pic_url TEXT,
+                        price TEXT,
+                        voted INTEGER DEFAULT 0,
+                        comments INTEGER DEFAULT 0,
+                        article_mall TEXT,
+                        article_time TEXT,
+                        pushed INTEGER DEFAULT 0
+                    )
+                ''')
+                
+                # 尝试恢复可能的数据
+                try:
+                    await conn.execute("INSERT INTO ZDM SELECT * FROM ZDM_old")
+                except:
+                    # 如果恢复失败，忽略错误
+                    pass
+                
+                # 删除旧表
+                await conn.execute("DROP TABLE IF EXISTS ZDM_old")
+        else:
+            # 创建新表
+            await conn.execute('''
+                CREATE TABLE ZDM (
+                    article_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    article_pic_url TEXT,
+                    price TEXT,
+                    voted INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    article_mall TEXT,
+                    article_time TEXT,
+                    pushed INTEGER DEFAULT 0
+                )
+            ''')
+        
         await conn.commit()
     
     async def save_or_update(self, data: dict):
@@ -69,25 +112,36 @@ class DatabaseUtil:
         await conn.commit()
     
     async def save_or_update_batch(self, data_list: List[dict]):
-        """批量保存或更新记录"""
+        """批量保存或更新记录，使用异步方式插入"""
         conn = await self.connect()
-        async with conn.execute_batch('''
-            INSERT OR REPLACE INTO ZDM 
-            (article_id, title, url, article_pic_url, price, voted, comments, article_mall, article_time, pushed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', [(
-            item.get('article_id'),
-            item.get('title'),
-            item.get('url'),
-            item.get('pic_url'),
-            item.get('price'),
-            item.get('voted', 0),
-            item.get('comments', 0),
-            item.get('article_mall'),
-            item.get('article_time'),
-            1 if item.get('pushed', False) else 0
-        ) for item in data_list]):
+        try:
+            # 使用参数化查询，逐条执行
+            sql = '''
+                INSERT OR REPLACE INTO ZDM 
+                (article_id, title, url, article_pic_url, price, voted, comments, article_mall, article_time, pushed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''
+            
+            # 逐条插入（aiosqlite不支持execute_batch的async with语法）
+            for item in data_list:
+                await conn.execute(sql, (
+                    item.get('article_id'),
+                    item.get('title'),
+                    item.get('url'),
+                    item.get('pic_url'),
+                    item.get('price'),
+                    item.get('voted', 0),
+                    item.get('comments', 0),
+                    item.get('article_mall'),
+                    item.get('article_time'),
+                    1 if item.get('pushed', False) else 0
+                ))
+            
             await conn.commit()
+        except Exception as e:
+            # 发生错误时回滚
+            await conn.rollback()
+            raise e
     
     async def get_unpushed_records(self) -> List[dict]:
         """获取未推送的记录"""

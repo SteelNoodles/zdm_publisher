@@ -65,13 +65,27 @@ class DataProcessingService:
             if article_id in pushed_ids:
                 continue
             
-            # 过滤点赞数过低的商品
-            voted = item.get('voted', 0)
+            # 过滤点赞数过低的商品，确保转换为整数
+            voted_str = item.get('voted', '0')
+            try:
+                # 移除可能的非数字字符
+                voted_str = ''.join(filter(str.isdigit, str(voted_str)))
+                voted = int(voted_str) if voted_str else 0
+            except (ValueError, TypeError):
+                voted = 0
+                
             if voted < self.min_vote_threshold:
                 continue
             
-            # 过滤评论数过低的商品
-            comments = item.get('comments', 0)
+            # 过滤评论数过低的商品，确保转换为整数
+            comments_str = item.get('comments', '0')
+            try:
+                # 移除可能的非数字字符
+                comments_str = ''.join(filter(str.isdigit, str(comments_str)))
+                comments = int(comments_str) if comments_str else 0
+            except (ValueError, TypeError):
+                comments = 0
+                
             if comments < self.min_comment_threshold:
                 continue
             
@@ -79,6 +93,10 @@ class DataProcessingService:
             title = item.get('title', '')
             if self.flash_sale_pattern.search(title):
                 continue
+            
+            # 更新商品中的数值字段为整数类型
+            item['voted'] = voted
+            item['comments'] = comments
             
             # 所有过滤条件都通过
             filtered.append(item)
